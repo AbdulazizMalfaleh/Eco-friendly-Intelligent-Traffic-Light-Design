@@ -1,0 +1,169 @@
+#include <esp_now.h>
+#include <WiFi.h>
+#include <RN.h>
+
+#define red 0
+#define yellow 1
+#define green 2
+
+RN sensor(2, 4); //Trig, Echo
+
+const int enA = 5;  // PWM pin for motor speed control
+const int in1 = 18;  // Motor driver input 1
+const int in2 = 19;  
+
+double d; // the distance b/w vehicle & TLS after receiving the msg (meter)
+double Delta = 5; // 1.38 m/s^2 = 5 km/h/s 
+double Smin = 40*0.0725; // Km/h
+double Smax = 60*0.0725; // Km/h
+double smin = Smin * 1000 / 3600; // m/s
+double smax = Smax * 1000 / 3600; // m/s
+double delta = Delta * 1000 / 3600; 
+double Lg = 3;
+double D = 0;
+double CL = 0;
+int Ng = 1;
+double sr = 0;
+
+#define CHANNEL 1 
+
+struct Trafficlight {
+  uint8_t Tr;
+  uint8_t Ty;
+  uint8_t Tg;
+  uint8_t color;
+};
+
+Trafficlight TLS; 
+
+void setup() {
+  pinMode(enA, OUTPUT);
+  pinMode(in1, OUTPUT);
+  pinMode(in2, OUTPUT);
+  digitalWrite(enA, LOW);
+  // put your setup code here, to run once:
+  Serial.begin(115200);
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP("RX_1", "RX_1_Password", CHANNEL, 0); //ScanForSlave SSID 
+  esp_now_init();
+  esp_now_register_recv_cb(OnDataRecv);
+}
+
+void loop() {
+  d = sensor.getDistance();
+ // Serial.print("Distance: ");
+  //Serial.print(distance);
+  //Serial.println(" cm");
+  //delay(1000);
+       
+  }
+
+
+
+void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len){
+  memcpy(&TLS,data,data_len);
+  Serial.print("Tr -> ");
+  Serial.println(TLS.Tr);
+  Serial.print("Ty -> ");
+  Serial.println(TLS.Ty);
+  Serial.print("Tg -> ");
+  Serial.println(TLS.Tg);
+  if (TLS.color == red){
+    Serial.println("-- RED --");
+    //analogWrite(enA, 0);
+  }
+  else if (TLS.color == green){
+    Serial.println("-- GREEN --");
+    //analogWrite(enA, 255);
+  }
+  else{
+    Serial.println("-- YELLOW --");
+    //analogWrite(enA, 155);
+  }
+
+CL = TLS.Ty + TLS.Tr + TLS.Tg;
+
+
+ if (d <= Lg * smax) {
+  sr = smax;
+  SrToMotor(sr);
+  Serial.print("sr1:");
+  Serial.println(sr);
+} else {
+  float C = (Ng - 1) * CL + Lg + TLS.Ty + TLS.Tr - D;  // Calculate C
+  float R[3] = {-1 / delta, smax / delta - C, d - smax * smax / (2 * delta)};  // Create R array
+  float S[2];  // Create an array to store the roots
+
+  // Calculate the roots of the quadratic equation
+  for (int i = 0; i < 2; i++) {
+    S[i] = (-R[1] + pow(-1, i) * sqrt(R[1] * R[1] - 4 * R[0] * R[2])) / (2 * R[0]);
+  }
+
+  // Check which root is valid
+  if (S[0] > 0 && S[0] < S[1]) {
+    sr = S[0];
+    SrToMotor(sr);
+    Serial.print("sr2:");
+    Serial.println(sr);
+  } else {
+    if (S[1] > 0) {
+      sr = S[1];
+      SrToMotor(sr);
+      Serial.print("sr3:");
+      Serial.println(sr);
+    } else {
+      Serial.println("Error. Both solutions are negative!!!");
+    }
+  }
+
+  // Limit 'sr' within the range [smin, smax]
+  if (sr > smax) {
+    sr = smax;
+  }
+  if (sr < smin) {
+    sr = smin;
+  }
+}
+
+/*
+// Convert 'sr' from m/s to km/h
+float SR = sr * 3600 / 1000;
+
+// Print the result
+Serial.print("SR: ");
+Serial.println(SR);
+
+*/
+  Serial.println("---------------------------------------");
+
+}
+
+void SrToMotor(double RecommendedSpeed){
+  if(RecommendedSpeed > 4.35){
+     analogWrite(enA, 250);  // Set motor speed to maximum
+     digitalWrite(in1, HIGH);
+     digitalWrite(in2, LOW);
+     delay(1000);
+//stop the machine at TLS  }
+  else if(RecommendedSpeed = 4.35){
+	analogWrite(enA, 250);  // Set motor speed to maximum
+     digitalWrite(in1, HIGH);
+     digitalWrite(in2, LOW); }
+  else if(RecommendedSpeed <2.5) {
+     analogWrite(enA, 150);  // Set motor speed to maximum
+     digitalWrite(in1, HIGH);
+     digitalWrite(in2, LOW);
+     delay(1000);   
+//stop the machine at TLS  }
+  else if(RecommendedSpeed =2.5) {
+     analogWrite(enA, 150);  // Set motor speed to maximum
+     digitalWrite(in1, HIGH);
+     digitalWrite(in2, LOW);
+     delay(1000);     }
+   else if (RecommendedSpeed <4.35 && RecommendedSpeed >2.5){
+	RecommendedSpeed =RecommendedSpeed 
+//make the switch case here or if else from 150 to 250 ,and from 2.5 to 4.35 }
+}
+
+
+

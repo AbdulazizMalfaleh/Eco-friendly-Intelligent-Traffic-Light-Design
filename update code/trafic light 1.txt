@@ -1,0 +1,130 @@
+#include <esp_now.h>
+#include <WiFi.h>
+#include <TFMini.h>  // Include the TFMini library
+
+#define red 0
+#define yellow 1
+#define green 2
+
+#define CHANNEL 1
+
+const int enA = 15;  // PWM pin for motor speed control
+const int in1 = 2;   // Motor driver input 1
+const int in2 = 4;   // Motor driver input 2
+
+const int rxPin = 16;  // RX pin for TFMini, change as needed
+const int txPin = 17;  // TX pin for TFMini, change as needed
+
+double SR = 0;
+double d = 12;
+double distance = 50;  // Initial value, will be updated periodically from TF mini
+int current_phase;
+
+int time_red = 5;
+int time_green = 3;
+int time_yellow = 1;
+int Tr = 0;
+int Tg = 0;
+int Ty = 0;
+
+int speed;
+
+struct Trafficlight {
+  uint8_t Tr;
+  uint8_t Ty;
+  uint8_t Tg;
+  uint8_t color;
+  uint8_t distance;
+
+  Trafficlight(uint8_t Tr, uint8_t Ty, uint8_t Tg, uint8_t color, uint8_t distance) {
+    this->Tr = Tr;
+    this->Ty = Ty;
+    this->Tg = Tg;
+    this->color = color;
+    this->distance = distance;
+  }
+};
+
+Trafficlight TLS;
+
+TFMini tfmini;
+
+void setup() {
+  pinMode(enA, OUTPUT);
+  pinMode(in1, OUTPUT);
+  pinMode(in2, OUTPUT);
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  Serial.begin(115200);
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP("RX_1", "RX_1_Password", CHANNEL, 0);
+  esp_now_init();
+  esp_now_register_recv_cb(OnDataRecv);
+
+  // Initialize TFMini
+  tfmini.begin(Serial2);
+}
+
+void loop() {
+  // Periodically update distance from TF mini
+  distance = tfmini.getDistance();
+
+  if (distance > 18) {
+    MaxSpeed();
+
+    // Check if there is a valid traffic light signal
+    if (Tr != 0 && Tg != 0 && Ty != 0) {
+      while (18 > distance && distance > 6) {
+        SpeedRecommended();
+        while (6 > distance && distance > 2) {
+          MaxSpeed();
+          while (distance < 1) {
+            Stop();
+          }
+        }
+      }
+    } else {
+      while (distance > 7) {
+        MaxSpeed();
+        while (7 > distance && distance > 6) {
+          if (Tr == 0 && Tg >= 1) {
+            MaxSpeed();
+            while (distance < 1)
+              Stop();
+          } else {
+            while (Tr != 0) {
+              Stop();
+              delay(1000);
+            }
+            while (6 < distance && distance < 2) {
+              MaxSpeed();
+              while (distance < 1)
+                Stop();
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+void SpeedRecommended() {
+  SR = d / (current_phase + time_red + time_green + time_yellow);
+  SR = SR * (3600 / 1000);  // to be km/h
+  speed = (SR + 2.176) / 0.025;
+  analogWrite(enA, speed);
+}
+
+void Stop() {
+  analogWrite(enA, 0);
+}
+
+void MaxSpeed() {
+  analogWrite(enA, 255);
+}
+
+void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
+  memcpy(&TLS, data, data_len);
+  current_phase = TLS.Tg + TLS.Tr + TLS.Ty;
+  Serial.println("Message received");
+}

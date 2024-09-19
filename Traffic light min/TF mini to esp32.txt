@@ -1,0 +1,81 @@
+#include <HardwareSerial.h>
+
+HardwareSerial TFminiSerial(1);  // Use Serial1 for ESP32
+
+void setup() {
+  Serial.begin(9600);
+  TFminiSerial.begin(115200, SERIAL_8N1, 10, 11); // RX pin 10, TX pin 11
+}
+
+void loop() {
+  int distanceValues[5];
+
+  // Read five distance values
+  for (int i = 0; i < 5; ++i) {
+    delay(1000);
+    readDistance(distanceValues[i]);
+    Serial.print("Distance ");
+    Serial.print(i + 1);
+    Serial.print(": ");
+    Serial.print(distanceValues[i]);
+    Serial.println(" cm");
+  }
+
+  // Calculate mean without outliers
+  double meanResult = calculateMeanWithoutOutliers(distanceValues, 5);
+
+  Serial.print("Mean distance without outliers: ");
+  Serial.print(meanResult);
+  Serial.println(" cm");
+
+  // Optionally, add a delay before repeating the process
+  delay(5000);
+}
+
+void readDistance(int &distance) {
+  distance = 0;
+
+  // Read the serial buffer until a valid frame is found
+  if (TFminiSerial.available() >= 9) {
+    if (TFminiSerial.read() == 0x59 && TFminiSerial.read() == 0x59) {
+      int lowByte = TFminiSerial.read();
+      int highByte = TFminiSerial.read();
+      distance = lowByte + highByte * 256;
+      TFminiSerial.read(); // discard checksum
+      TFminiSerial.read(); // discard checksum
+    }
+  }
+}
+
+double calculateMeanWithoutOutliers(int values[], int size) {
+  // Find the minimum and maximum values
+  int minValue = values[0];
+  int maxValue = values[0];
+
+  for (int i = 1; i < size; ++i) {
+    if (values[i] < minValue) {
+      minValue = values[i];
+    }
+    if (values[i] > maxValue) {
+      maxValue = values[i];
+    }
+  }
+
+  // Calculate the mean excluding the minimum and maximum values
+  double sum = 0.0;
+  int count = 0;
+
+  for (int i = 0; i < size; ++i) {
+    if (values[i] != minValue && values[i] != maxValue) {
+      sum += values[i];
+      ++count;
+    }
+  }
+
+  // Avoid division by zero
+  if (count > 0) {
+    return sum / count;
+  } else {
+    return 0.0;
+  }
+}

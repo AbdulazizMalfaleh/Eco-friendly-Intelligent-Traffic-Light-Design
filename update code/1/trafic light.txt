@@ -1,0 +1,171 @@
+#include <esp_now.h>
+#include <WiFi.h>
+
+#define red 0
+#define yellow 1
+#define green 2
+
+#define CHANNEL 1 //same channel between M and S 
+esp_now_peer_info_t slave;
+
+int GREEN = 5;
+int YELLOW = 4;
+int RED = 15;
+
+int DELAY_GREEN = 3000;
+int DELAY_YELLOW = 1000;
+int DELAY_RED = 5000;
+
+const int triggerPin = 23;  // Replace with the actual pin connected to the trigger
+const int echoPin = 22; 
+
+
+
+struct Trafficlight{
+  uint8_t msg=1;
+  uint8_t Tr; //seconds
+  uint8_t Ty; //seconds
+  uint8_t Tg; //seconds
+  uint8_t color;
+  float distance=100.0;
+  };
+
+Trafficlight TLS;
+
+ void setup(){
+  pinMode(GREEN, OUTPUT);
+  pinMode(YELLOW, OUTPUT);
+  pinMode(RED, OUTPUT);
+
+   Serial.begin(115200); //start serial monitor baud rate 115200
+   WiFi.mode(WIFI_STA); //Tx mode is STA
+   esp_now_init(); //initiate espNOW
+   esp_now_register_send_cb(OnDataSent); // call back function
+   ScanForSlave();
+   esp_now_add_peer(&slave); //pointer of slave
+  pinMode(triggerPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  }
+
+ void loop(){
+    TLS.Tr=5; 
+    TLS.Ty=1;
+    TLS.Tg=3;
+    
+
+  yellow_light();
+  TLS.color = yellow;
+  for(int k=0; k<1; k++){ 
+   delay(980);
+   TLS.Ty = TLS.Ty - 1;
+  TLS.distance = ReadUltrasonicSensor();
+  esp_now_send(slave.peer_addr, (uint8_t*)&TLS, sizeof(TLS));
+ }
+
+
+   red_light();
+   TLS.color = red;
+    for(int i=0; i<5; i++){
+      delay(980);
+      TLS.Tr = TLS.Tr - 1;
+      TLS.distance = ReadUltrasonicSensor();
+      esp_now_send(slave.peer_addr,(uint8_t*)&TLS, sizeof(TLS));  
+    }
+
+  // open green 
+  green_light();
+  TLS.color = green;
+  TLS.distance = 20;
+  for(int j=0; j<3; j++){ 
+    delay(980); 
+    TLS.Tg = TLS.Tg - 1;
+    TLS.distance = ReadUltrasonicSensor();
+    //esp_now_send(slave.peer_addr, &TLS_distance, sizeof(TLS_distance));
+    esp_now_send(slave.peer_addr, (uint8_t*)&TLS, sizeof(TLS));
+ }
+ 
+  //TLS.distance = ReadUltrasonicSensor();
+  //esp_now_send(slave.peer_addr, (uint8_t*)&TLS, sizeof(TLS));
+  //Serial.println("--------------------------------------------");
+  
+  TLS.msg++;
+ }
+
+ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status){
+   Serial.println("I sent data -> ");
+   Serial.print("red time: ");
+   Serial.println(TLS.Tr);
+   Serial.print("yellow time: ");
+   Serial.println(TLS.Ty);
+   Serial.print("green time: ");
+   Serial.println(TLS.Tg);
+   if(TLS.color == red)
+   Serial.println("-- RED --");
+   else if(TLS.color == green)
+   Serial.println("-- GREEN --");
+   else
+   Serial.println("-- YELLOW --");
+  
+  Serial.print("Vehicle distance: ");
+  Serial.println(TLS.distance);
+
+  Serial.println("---------------------------------------");
+ }
+
+float ReadUltrasonicSensor() {
+  // Trigger the ultrasonic sensor
+  digitalWrite(triggerPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(triggerPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(triggerPin, LOW);
+
+  // Read the echo pulse duration and calculate distance
+  long duration = pulseIn(echoPin, HIGH);
+  float distance = (duration / 2) / 29.1; // Divide by 29.1 to convert to centimeters
+
+  return distance;
+}
+
+
+void ScanForSlave(){  
+   int8_t scanResults = WiFi.scanNetworks();
+
+   for( int i=0; i<scanResults; ++i){
+     String SSID = WiFi.SSID(i);
+     String BSSIDstr = WiFi.BSSIDstr(i);
+
+     if(SSID.indexOf("RX_1") == 0){
+           int mac[6];
+           if(6==sscanf(BSSIDstr.c_str(), "%x:%x:%x:%x:%x:%x", &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5])){
+             for(int ii=0; ii<6; ++ii){
+               slave.peer_addr[ii] = (uint8_t) mac[ii];
+             }
+           }
+           slave.channel = CHANNEL;
+           slave.encrypt =0;
+           break;
+     }
+   }
+ }
+
+void green_light()
+{
+  digitalWrite(GREEN, HIGH);
+  digitalWrite(YELLOW, LOW);
+  digitalWrite(RED, LOW);
+}
+
+void yellow_light()
+{
+  digitalWrite(GREEN, LOW);
+  digitalWrite(YELLOW, HIGH);
+  digitalWrite(RED, LOW);
+}
+
+void red_light()
+{
+  digitalWrite(GREEN, LOW);
+  digitalWrite(YELLOW, LOW);
+  digitalWrite(RED, HIGH);
+}

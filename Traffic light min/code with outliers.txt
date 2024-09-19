@@ -1,0 +1,84 @@
+#include <SoftwareSerial.h>
+
+SoftwareSerial mySerial(10, 11); // RX, TX
+
+void setup() {
+  Serial.begin(9600);
+  mySerial.begin(115200);
+}
+
+void loop() {
+  int distanceValues[5];
+
+  // Read five distance values
+  for (int i = 0; i < 5; ++i) {
+    delay(1000);
+    if (mySerial.available() >= 9) {
+      distanceValues[i] = readDistance();
+      Serial.print("Distance ");
+      Serial.print(i + 1);
+      Serial.print(": ");
+      Serial.print(distanceValues[i]);
+      Serial.println(" cm");
+    }
+  }
+
+  // Calculate mean without outliers
+  double meanResult = calculateMeanWithoutOutliers(distanceValues, 5);
+
+  Serial.print("Mean distance without outliers: ");
+  Serial.print(meanResult);
+  Serial.println(" cm");
+
+  // Optionally, add a delay before repeating the process
+  delay(5000);
+}
+
+int readDistance() {
+  int distance = 0;
+
+  // Read the serial buffer until a valid frame is found
+  if (mySerial.read() == 0x59 && mySerial.read() == 0x59) {
+    int lowByte = mySerial.read();
+    int highByte = mySerial.read();
+    distance = (highByte << 8) + lowByte; // Combine low and high bytes
+    mySerial.read(); // discard checksum
+    mySerial.read(); // discard checksum
+  }
+
+  // Return 0 if no valid frame is found
+  return distance;
+}
+
+double calculateMeanWithoutOutliers(int values[], int size) {
+  // Find the minimum and maximum values
+  int minValue = values[0];
+  int maxValue = values[0];
+
+  for (int i = 1; i < size; ++i) {
+    if (values[i] < minValue) {
+      minValue = values[i];
+    }
+    if (values[i] > maxValue) {
+      maxValue = values[i];
+    }
+  }
+
+  // Calculate the mean excluding the minimum and maximum values
+  double sum = 0.0;
+  int count = 0;
+
+  for (int i = 0; i < size; ++i) {
+    if (values[i] != minValue && values[i] != maxValue) {
+      sum += values[i];
+      ++count;
+    }
+  }
+
+  // Avoid division by zero
+  if (count > 0) {
+    return sum / count;
+  } else {
+    return 0.0;
+  }
+}

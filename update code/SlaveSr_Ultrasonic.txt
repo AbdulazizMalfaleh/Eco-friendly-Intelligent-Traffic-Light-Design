@@ -1,0 +1,191 @@
+#include <esp_now.h>
+#include <WiFi.h>
+
+#define red 0
+#define yellow 1
+#define green 2
+
+#define CHANNEL 1
+
+// Define ultrasonic sensor pins
+const int triggerPin = 18;  // Replace with the actual pin connected to the trigger
+const int echoPin = 19;     // Replace with the actual pin connected to the echo
+
+const int enA = 15;  // PWM pin for motor speed control
+const int in1 = 2;  // Motor driver input 1
+const int in2 = 4;  // Motor driver input 2
+
+
+  // the distance b/w vehicle & TLS after receiving the msg (meter)
+  double Delta = 5; // 1.38 m/s^2 = 5 km/h/s 
+  double Smin = 40*0.0725; // Km/h
+  double Smax = 60*0.0725; // Km/h
+  double smin = (Smin * 1000) / 3600; // m/s
+  double smax = (Smax * 1000) / 3600; // m/s
+  double delta = (Delta * 1000) / 3600; // m/s^2
+  double Ty = 1;
+  double Tr = 5;
+  double Tg = 3;
+  double Lg = 3;
+  double D = 0;
+  double CL = Ty + Tr + Tg;
+  int Ng = 1;
+
+  int x;
+
+struct Trafficlight {
+  uint8_t Tr;
+  uint8_t Ty;
+  uint8_t Tg;
+  uint8_t color;
+};
+
+Trafficlight TLS; 
+
+void setup() {
+  pinMode(enA, OUTPUT);
+  pinMode(in1, OUTPUT);
+  pinMode(in2, OUTPUT);
+  digitalWrite(enA, LOW); 
+  Serial.begin(115200);
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP("RX_1", "RX_1_Password", CHANNEL, 0);
+  // Initialize ESP-NOW
+  esp_now_init();
+  esp_now_register_recv_cb(OnDataRecv);
+  // Initialize ultrasonic sensor pins
+  pinMode(triggerPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+}
+
+
+void loop() {
+  // You can include additional logic here if needed
+}
+
+void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
+  memcpy(&TLS,data,data_len);
+  //********************************************************************************
+  Lg = TLS.Tg;
+  //********************************************************************************
+  Serial.print("Tr -> ");
+  Serial.println(TLS.Tr);
+  Serial.print("Ty -> ");
+  Serial.println(TLS.Ty);
+  Serial.print("Tg -> ");
+  //********************************************************************************
+  // I change it from TLS.Tg to Lg to check if Lg is working proberly 
+  Serial.println(Lg);
+  //********************************************************************************
+  if (TLS.color == red){
+    Serial.println("-- RED --"); 
+  }
+  else if (TLS.color == green){
+    Serial.println("-- GREEN --");
+  }
+  else{
+    Serial.println("-- YELLOW --");
+  }
+
+  // Read distance from the ultrasonic sensor
+  float d = ReadUltrasonicSensor();
+  Serial.print("Distance: ");
+  Serial.println(d);
+
+
+//********************************************************************************
+// Stop the vehicle when approaching the TLS at yellow or red phase
+  if(d <= 2 && (TLS.Ty <= 1 || TLS.Ty != 2)){
+        analogWrite(enA, 0);  
+        digitalWrite(in1, HIGH);
+        digitalWrite(in2, LOW);
+  }
+//********************************************************************************
+
+
+
+  if (d <= Lg * smax) { // if the vehicle at smax will pass the current green TLS 
+    double sr = smax;
+    Serial.println("SR: " + String(sr * 3600 / 1000) + " km/h");
+  } else {
+    double C = (Ng - 1) * CL + Lg + Ty + Tr - D; // the denominator of the formula
+    double R[3];
+    R[0] = -1 / delta;
+    R[1] = smax / delta - C;
+    R[2] = d - smax * smax / (2 * delta);
+    
+    double discriminant = R[1] * R[1] - 4 * R[0] * R[2];
+    double sr;
+    
+    if (discriminant >= 0) {
+      double S1 = (-R[1] + sqrt(discriminant)) / (2 * R[0]);
+      double S2 = (-R[1] - sqrt(discriminant)) / (2 * R[0]);
+      
+      if (S1 > 0 && S1 < S2) {
+        sr = S1;
+        Serial.println("sr = S1");
+        //********************************************************************************
+        x = (sr + 2.176) / 0.025;
+        //********************************************************************************
+        analogWrite(enA, x);  // Set motor speed to Sr
+        digitalWrite(in1, HIGH);
+        digitalWrite(in2, LOW);
+      } 
+      else {
+        sr = S2;
+        Serial.println("sr = S2");
+        //********************************************************************************
+        x = (sr + 2.176) / 0.025;
+        //********************************************************************************
+        analogWrite(enA, x);  // Set motor speed to Sr
+        digitalWrite(in1, HIGH);
+        digitalWrite(in2, LOW);
+      }
+      
+      if (sr > smax) {
+        sr = smax;
+        Serial.println("sr = smax");
+        analogWrite(enA, 250);  // Set motor speed to maximum speed
+        digitalWrite(in1, HIGH);
+        digitalWrite(in2, LOW);
+      }
+      
+      if (sr < smin) {
+        sr = smin;
+        Serial.println("sr = smin");
+        analogWrite(enA, 150);  // Set motor speed to minimum speed
+        digitalWrite(in1, HIGH);
+        digitalWrite(in2, LOW);
+      }
+       
+      Serial.println("SR: " + String(sr * 3600 / 1000) + " km/h");
+    } else {
+      Serial.println("Error. Both solutions are negative!!!");
+    }
+  }
+  Serial.println("---------------------------------------");
+}
+
+float ReadUltrasonicSensor() {
+  // Trigger the ultrasonic sensor
+  digitalWrite(triggerPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(triggerPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(triggerPin, LOW);
+
+  // Read the echo pulse duration and calculate distance
+  long duration = pulseIn(echoPin, HIGH);
+  float distance = (duration / 2) / 29.1; // Divide by 29.1 to convert to centimeters
+
+  return distance;
+}
+
+
+
+
+
+
+
+
+

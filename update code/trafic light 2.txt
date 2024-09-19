@@ -1,0 +1,208 @@
+#include <esp_now.h>
+#include <WiFi.h>
+#include <SoftwareSerial.h>
+#include <TFMini.h>
+
+#define red 0
+#define yellow 1
+#define green 2
+
+#define CHANNEL 1
+
+const int enA = 15;  // PWM pin for motor speed control
+const int in1 = 2;   // Motor driver input 1
+const int in2 = 4;   // Motor driver input 2
+
+const int rxPin = 10;  // RX pin for SoftwareSerial (TFMini), change as needed
+const int txPin = 11;  // TX pin for SoftwareSerial (TFMini), change as needed
+
+double SR = 0;
+double d = 12;
+double distance = 50;  // Initial value, will be updated periodically from TF mini
+int current_phase;
+
+int time_red = 5;
+int time_green = 3;
+int time_yellow = 1;
+int Tr = 0;
+int Tg = 0;
+int Ty = 0;
+
+int speed;
+
+struct Trafficlight {
+  uint8_t Tr;
+  uint8_t Ty;
+  uint8_t Tg;
+  uint8_t color;
+  uint8_t distance;
+
+  Trafficlight(uint8_t Tr, uint8_t Ty, uint8_t Tg, uint8_t color, uint8_t distance) {
+    this->Tr = Tr;
+    this->Ty = Ty;
+    this->Tg = Tg;
+    this->color = color;
+    this->distance = distance;
+  }
+};
+
+Trafficlight TLS;
+
+SoftwareSerial mySerial(rxPin, txPin);  // Define SoftwareSerial for TFMini
+TFMini tfmini;
+
+void setup() {
+  pinMode(enA, OUTPUT);
+  pinMode(in1, OUTPUT);
+  pinMode(in2, OUTPUT);
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  Serial.begin(115200);
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP("RX_1", "RX_1_Password", CHANNEL, 0);
+  esp_now_init();
+  esp_now_register_recv_cb(OnDataRecv);
+
+  // Initialize SoftwareSerial for TFMini
+  mySerial.begin(115200);
+  tfmini.begin(mySerial);
+}
+
+void loop() {
+  // Periodically update distance from TF mini
+  distance = ReadTFMini();
+
+  if (distance > 18) {
+    MaxSpeed();
+
+    // Check if there is a valid traffic light signal
+    if (Tr != 0 && Tg != 0 && Ty != 0) {
+      while (18 > distance && distance > 6) {
+        SpeedRecommended();
+        while (6 > distance && distance > 2) {
+          MaxSpeed();
+          while (distance < 1) {
+            Stop();
+          }
+        }
+      }
+    } else {
+      while (distance > 7) {
+        MaxSpeed();
+        while (7 > distance && distance > 6) {
+          if (Tr == 0 && Tg >= 1) {
+            MaxSpeed();
+            while (distance < 1)
+              Stop();
+          } else {
+            while (Tr != 0) {
+              Stop();
+              delay(1000);
+            }
+            while (6 < distance && distance < 2) {
+              MaxSpeed();
+              while (distance < 1)
+                Stop();
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+void SpeedRecommended() {
+  SR = d / (current_phase + time_red + time_green + time_yellow);
+  SR = SR * (3600 / 1000);  // to be km/h
+  speed = (SR + 2.176) / 0.025;
+  analogWrite(enA, speed);
+}
+
+void Stop() {
+  analogWrite(enA, 0);
+}
+
+void MaxSpeed() {
+  analogWrite(enA, 255);
+}
+
+double ReadTFMini() {
+  int distanceValues[5];
+
+  // Read five distance values
+  for (int i = 0; i < 5; ++i) {
+    delay(1000);
+    if (mySerial.available() >= 9) {
+      distanceValues[i] = readDistance();
+      Serial.print("Distance ");
+      Serial.print(i + 1);
+      Serial.print(": ");
+      Serial.print(distanceValues[i]);
+      Serial.println(" cm");
+    }
+  }
+
+  // Calculate mean without outliers
+  double meanResult = calculateMeanWithoutOutliers(distanceValues, 5);
+
+  Serial.print("Mean distance without outliers: ");
+  Serial.print(meanResult);
+  Serial.println(" cm");
+
+  return meanResult;
+}
+
+int readDistance() {
+  int distance = 0;
+
+  // Read the serial buffer until a valid frame is found
+  if (mySerial.read() == 0x59 && mySerial.read() == 0x59) {
+    int lowByte = mySerial.read();
+    int highByte = mySerial.read();
+    distance = (highByte << 8) + lowByte; // Combine low and high bytes
+    mySerial.read(); // discard checksum
+    mySerial.read(); // discard checksum
+  }
+
+  // Return 0 if no valid frame is found
+  return distance;
+}
+
+double calculateMeanWithoutOutliers(int values[], int size) {
+  // Find the minimum and maximum values
+  int minValue = values[0];
+  int maxValue = values[0];
+
+  for (int i = 1; i < size; ++i) {
+    if (values[i] < minValue) {
+      minValue = values[i];
+    }
+    if (values[i] > maxValue) {
+      maxValue = values[i];
+    }
+  }
+
+  // Calculate the mean excluding the minimum and maximum values
+  double sum = 0.0;
+  int count = 0;
+
+  for (int i = 0; i < size; ++i) {
+    if (values[i] != minValue && values[i] != maxValue) {
+      sum += values[i];
+      ++count;
+    }
+  }
+
+  // Avoid division by zero
+  if (count > 0) {
+    return sum / count;
+  } else {
+    return 0.0;
+  }
+}
+
+void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
+  memcpy(&TLS, data, data_len);
+  current_phase = TLS.Tg + TLS.Tr + TLS.Ty;
+  Serial.println("Message received");
+}

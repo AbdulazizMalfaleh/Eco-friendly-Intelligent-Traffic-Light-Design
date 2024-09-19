@@ -1,0 +1,189 @@
+#include <esp_now.h>
+#include <WiFi.h>
+
+#define red 0
+#define yellow 1
+#define green 2
+
+#define CHANNEL 1
+
+const int enA = 2;  // PWM pin for motor speed control
+const int in1 = 22;  // Motor driver input 1
+const int in2 = 23;  // Motor driver input 2
+
+const int triggerPin = 18;  // Replace with the actual pin connected to the trigger
+const int echoPin = 19;
+
+  // the distance b/w vehicle & TLS after receiving the msg (meter)
+  float d = 8; // the distance b/w vehicle & TLS after receiving the msg (meter)
+  float Delta = 5.6; // 1.38 m/s^2 = 5 km/h/s 
+  float Smin = 40.0 * 0.06666667; // Km/h
+  float Smax = 60.0 * 0.06666667; // Km/h
+  float smin = (Smin * 1000.0) / 3600.0; // m/s
+  float smax = (Smax * 1000.0) / 3600.0; // m/s
+  float delta = (Delta * 1000.0) / 3600.0; // m/s^2
+  float Ty = 1.0;
+  float Tr = 5.0;
+  float Tg = 3.0;
+  float Lg = 3.0;
+  float D = 0.0;
+  float CL = Ty + Tr + Tg;
+  int Ng = 1;
+
+  float sr;
+  float SR = 0;
+  int speed;
+  
+  float front_distance;
+
+  bool VehicleNearTLS = true;
+
+struct Trafficlight {
+  uint8_t msg;
+  uint8_t Tr;
+  uint8_t Ty;
+  uint8_t Tg;
+  uint8_t color;
+  float distance;
+};
+
+Trafficlight TLS; 
+
+void setup() {
+  pinMode(enA, OUTPUT);
+  pinMode(in1, OUTPUT);
+  pinMode(in2, OUTPUT);
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  pinMode(triggerPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  Serial.begin(115200);
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP("RX_1", "RX_1_Password", CHANNEL, 0);
+  esp_now_init();
+  esp_now_register_recv_cb(OnDataRecv);
+}
+
+void loop() {
+  //front_distance = ReadUltrasonicSensor();
+  //if(front_distance <= 20) {//200cm 
+    //Serial.println("Emergency Stop!");
+    //Stop();
+  //}
+//else{
+while(SR != 0){
+ if(TLS.distance < 100 && TLS.msg !=1){
+    switch(TLS.color){
+      case red:
+      Serial.println("case red");
+      Stop();
+      break;
+
+      case yellow:
+      Serial.println("case yellow");
+      Stop();
+       break;
+
+       case green:
+       Serial.println("case green");
+       MaxSpeed();
+       break;
+    }//switch
+ }//if
+  Serial.println("Message received --> SR");
+  SRr();
+} //while
+Serial.println("SR = 0 ---> MaxSpeed");
+MaxSpeed();
+
+//}//else  
+}
+
+float ReadUltrasonicSensor() {
+  // Trigger the ultrasonic sensor
+  digitalWrite(triggerPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(triggerPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(triggerPin, LOW);
+
+  // Read the echo pulse duration and calculate distance
+  long duration = pulseIn(echoPin, HIGH);
+  float distance = (duration / 2) / 29.1; // Divide by 29.1 to convert to centimeters
+
+  return distance;
+}
+
+void Stop(){
+  analogWrite(enA,0);
+}
+void SRr(){
+      speed = (SR + 2.176) / 0.025;
+      analogWrite(enA, speed);  
+}
+void MaxSpeed(){
+  analogWrite(enA, 255);
+}
+
+void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
+  memcpy(&TLS,data,data_len);
+  //********************************************************************************
+if(TLS.color == green && TLS.msg==1){
+  Serial.println("Message Received!");
+if (d <= Lg * smax) {  // if the vehicle at smax will pass the current green TLS 
+    sr = smax;
+    //Serial.println("SR: d <= Lg * smax");
+  } else {
+    float C = (Ng - 1) * CL + Lg + Ty + Tr - D; // the denominator of the formula
+    float R[3] = {-1.0 / delta, smax / delta - C, d - smax * smax / (2.0 * delta)};
+    float S[2];
+
+    quadraticRoots(R, S);
+
+    if (S[0] > 0 && S[0] < S[1]) {
+      sr = S[0];
+      //Serial.println("SR: S[0]");
+    } else {
+      if (S[1] > 0) {
+        sr = S[1];
+        //Serial.println("SR: S[1]");
+      } else {
+        Serial.println("Error. Both solutions are negative!!!");
+        return;
+      }
+    }
+
+    // sr = min(max(sr, smin), smax);
+    if (sr > smax) {
+      sr = smax;
+      //Serial.println("SR: smax");
+    }
+    if (sr < smin) {
+      sr = smin;
+      //Serial.println("SR: smin");
+    }
+  }
+
+  }
+
+  SR = sr * 3600.0 / 1000.0; // to convert from m/s to km/h
+  Serial.print("SR: ");
+  Serial.println(SR);
+  Serial.print("Vehicle distance: ");
+  Serial.println(TLS.distance);
+  Serial.println("---------------------------------------");
+}
+
+void quadraticRoots(float coefficients[3], float roots[2]) {
+  float a = coefficients[0];
+  float b = coefficients[1];
+  float c = coefficients[2];
+
+  float discriminant = b * b - 4 * a * c;
+
+  if (discriminant >= 0) {
+    roots[0] = (-b + sqrt(discriminant)) / (2 * a);
+    roots[1] = (-b - sqrt(discriminant)) / (2 * a);
+  } else {
+    roots[0] = roots[1] = 0; // Complex roots, set to zero or handle differently as needed
+  }

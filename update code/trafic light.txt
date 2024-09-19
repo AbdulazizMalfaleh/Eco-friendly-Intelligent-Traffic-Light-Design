@@ -1,0 +1,178 @@
+#include <esp_now.h>
+#include <WiFi.h>
+//#include <SoftwareSerial.h>
+//000000000
+#define red 0
+#define yellow 1
+#define green 2
+
+#define CHANNEL 1
+
+//SoftwareSerial mySerial(10, 11);
+const int enA = 15;  // PWM pin for motor speed control
+const int in1 = 2;  // Motor driver input 1
+const int in2 = 4;  // Motor driver input 2
+
+const int triggerPin = 23;  // Replace with the actual pin connected to the trigger
+const int echoPin = 22;
+
+  // the distance b/w vehicle & TLS after receiving the msg (meter)
+
+ double SR = 0;
+ double d = 12;
+ double distance =50;//this from TF mini
+ int current_phase;
+
+ int time_red = 5;
+ int time_green = 3;
+ int time_yellow = 1;
+ int Tr = 0;
+ int Tg = 0;
+ int Ty = 0;
+
+
+
+ int speed;
+
+struct Trafficlight {
+  uint8_t Tr;
+  uint8_t Ty;
+  uint8_t Tg;
+  uint8_t color;
+  uint8_t distance;
+
+  Trafficlight(uint8_t Tr, uint8_t Ty, uint8_t Tg, uint8_t color, uint8_t distance) {
+    this->Tr = Tr;
+    this->Ty = Ty;
+    this->Tg = Tg;
+    this->color = color;
+    this->distance = distance;
+  }
+};
+
+Trafficlight TLS; 
+
+void setup() {
+  pinMode(enA, OUTPUT);
+  pinMode(in1, OUTPUT);
+  pinMode(in2, OUTPUT);
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  pinMode(triggerPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  Serial.begin(115200);
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP("RX_1", "RX_1_Password", CHANNEL, 0);
+  esp_now_init();
+  esp_now_register_recv_cb(OnDataRecv);
+   //mySerial.begin(115200);
+}
+
+void loop() {
+/*
+if(SR == 0){
+    Serial.println("SR = 0");
+    MaxSpeed();
+  }
+else{
+  if
+  Serial.println("SR calculated");
+  SpeedRecommended();
+}
+*/
+while (distance>18){
+  MaxSpeed();
+  // need other way to test if there connection estaplish 
+  if(Tr=!0 &&Tg=!0 && Ty=!0){
+  while(18>distance>6){
+    SpeedRecommended();
+    while(6>distance>2){
+     MaxSpeed();
+    while(distance<1){
+      Stop();
+    }
+    }
+  }
+  }else while(distance>7){
+      MaxSpeed();
+         while(7>distance>6){
+          if (Tr==0 && Tg>=1){
+           MaxSpeed();
+           while(distance<1)
+           Stop();
+          }else while(Tr=!0){
+            Stop();
+            delay(1000);
+          }while(6<distance<2){
+          MaxSpeed();
+          while(distance<1)
+           Stop();
+          }
+         }
+  }
+
+  
+}
+
+
+
+}
+ 
+void SpeedRecommended(){
+    SR = d / (current_phase + time_red + time_green + time_yellow);
+    SR = SR * (3600/1000);//to be km/h
+    speed = (SR + 2.176) / 0.025;
+    analogWrite(enA, speed);
+}
+
+
+void Stop(){
+  analogWrite(enA,0);
+}
+
+void MaxSpeed(){
+  analogWrite(enA, 255);
+}
+
+
+float ReadUltrasonicSensor() {
+  // Trigger the ultrasonic sensor
+  digitalWrite(triggerPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(triggerPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(triggerPin, LOW);
+
+  // Read the echo pulse duration and calculate distance
+  long duration = pulseIn(echoPin, HIGH);
+  float distance = (duration / 2) / 29.1; // Divide by 29.1 to convert to centimeters
+
+  return distance;
+}
+
+
+void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
+  memcpy(&TLS,data,data_len);
+  //********************************************************************************
+    current_phase = TLS.Tg + TLS.Tr + TLS.Ty;
+    Serial.println("Message received");
+    
+}
+
+/*
+switch(TLS.color){
+      case red:
+      Serial.println("case red");
+      Stop();
+      break;
+
+      case yellow:
+      Serial.println("case yellow");
+      Stop();
+       break;
+
+       case green:
+       Serial.println("case green");
+       MaxSpeed();
+       break;
+}//switch*/

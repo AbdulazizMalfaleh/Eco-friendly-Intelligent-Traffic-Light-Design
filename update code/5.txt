@@ -1,0 +1,84 @@
+#include <SoftwareSerial.h>
+SoftwareSerial mySerial(23, 22); // RX, TX
+
+void setup() {
+  Serial.begin(9600);
+  mySerial.begin(115200);
+}
+
+void loop() {
+  int distanceValues[5];
+
+  // Read five distance values
+  for (int i = 0; i < 5; ++i) {
+    if (mySerial.available()) {
+      distanceValues[i] = readDistance();
+      Serial.print("Distance ");
+      Serial.print(i + 1);
+      Serial.print(": ");
+      Serial.print(distanceValues[i]);
+      Serial.println(" cm");
+      delay(1000);
+    }
+  }
+
+  // Calculate mean without outliers
+  double meanResult = calculateMeanWithoutOutliers(
+      distanceValues[0], distanceValues[1], distanceValues[2], distanceValues[3], distanceValues[4]);
+
+  Serial.print("Mean distance without outliers: ");
+  Serial.print(meanResult);
+  Serial.println(" cm");
+
+  // Optionally, add a delay before repeating the process
+  delay(5000);
+}
+
+int readDistance() {
+  int distance = 0;
+  
+  // Read the serial buffer until a valid frame is found
+  while (mySerial.available() >= 9) {
+    if (mySerial.read() == 0x59) {
+      if (mySerial.read() == 0x59) {
+        int lowByte = mySerial.read();
+        int highByte = mySerial.read();
+        distance = (highByte << 8) + lowByte; // Combine low and high bytes
+        mySerial.read(); // discard checksum
+        mySerial.read(); // discard checksum
+        return distance;
+      }
+    }
+  }
+
+  // Return 0 if no valid frame is found
+  return 0;
+}
+
+double calculateMeanWithoutOutliers(double value1, double value2, double value3, double value4, double value5) {
+  // Collect the values in an array
+  double values[] = {value1, value2, value3, value4, value5};
+
+  // Sort the values (bubble sort for simplicity)
+  for (int i = 0; i < 4; ++i) {
+    for (int j = 0; j < 4 - i; ++j) {
+      if (values[j] > values[j + 1]) {
+        // Swap values
+        double temp = values[j];
+        values[j] = values[j + 1];
+        values[j + 1] = temp;
+      }
+    }
+  }
+
+  // Remove the smallest and largest values (outliers)
+  double sum = 0.0;
+  for (int i = 1; i < 4; ++i) {
+    sum += values[i];
+  }
+
+  // Calculate the mean of the remaining values
+  double meanValue = sum / 3.0;
+
+  return meanValue;
+}
